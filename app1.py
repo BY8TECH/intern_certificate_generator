@@ -335,4 +335,4 @@ def generate_certificate(name, regno, course, from_date, to_date, degree, depart
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=False)
