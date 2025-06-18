@@ -1,5 +1,5 @@
 import os
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, send_from_directory
 import pandas as pd
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -14,6 +14,8 @@ from reportlab.lib.enums import TA_JUSTIFY
 import pandas as pd
 import os
 from reportlab.lib.colors import orange, blue
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
 
@@ -21,17 +23,33 @@ UPLOAD_FOLDER = 'uploads'
 CERT_FOLDER = 'certificates'
 BACKGROUND_IMAGE = 'certificate.jpg'  # Make sure this file exists
 
+
+
+EMAIL_SENDER = 'smby8labs@gmail.com'
+EMAIL_PASSWORD = 'rdhz jjkr gnjr ehch'
+EMAIL_SMTP = 'smtp.gmail.com'
+EMAIL_PORT = 587
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(CERT_FOLDER, exist_ok=True)
 
-HTML = '''
-<h2>Upload Excel File to Generate Certificates</h2>
-<form method="POST" enctype="multipart/form-data">
-    <input type="file" name="excel" accept=".xlsx"><br><br>
-    <input type="submit" value="Generate">
-</form>
-'''
+# HTML = '''
+# <h2>Upload Excel File to Generate Certificates</h2>
+# <form method="POST" enctype="multipart/form-data">
+#     <input type="file" name="excel" accept=".xlsx"><br><br>
+#     <input type="submit" value="Generate">
+# </form>
+# '''
 
+
+HTML = '''
+    <h2>Upload Excel File to Generate Certificates</h2>
+    <form method="POST" enctype="multipart/form-data">
+        <input type="file" name="excel" accept=".xlsx" required>
+        <button type="submit">Generate</button>
+    </form>
+    <p><a href="/certificates">📄 View All Certificates</a></p>
+    '''
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -55,8 +73,172 @@ def index():
                 degree=row["Degree"],
                 duration=row["Duration"]
             )
-        return f"✅ Certificates generated in '{CERT_FOLDER}' folder."
+        # return f"✅ Certificates generated in '{CERT_FOLDER}' folder."
+        return f"✅ Certificates generated! <a href='/certificates'>View all</a>"
     return render_template_string(HTML)
+
+
+# @app.route('/certificates')
+# def list_certs():
+#     files = os.listdir(CERT_FOLDER)
+#     links = "".join(
+#         f'<li><a href="/download/{file}" download>{file}</a></li>' for file in files
+#     )
+#     return f"<h2>Generated Certificates</h2><ul>{links}</ul>"
+
+
+
+@app.route('/certificates')
+def list_certs():
+    files = sorted(f for f in os.listdir(CERT_FOLDER) if f.lower().endswith('.pdf'))
+    return render_template_string("""
+    <!DOCTYPE html>
+    <html><head><title>Certificates</title>
+    <style>
+    body { font-family: sans-serif; margin: 40px; background: #f4f4f4; }
+    #search { width: 60%; padding: 10px; margin: 20px auto; display: block; font-size: 16px; }
+    ul { list-style-type: none; padding: 0; max-width: 700px; margin: auto; }
+    li { background: white; margin: 10px 0; padding: 12px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    input[type="email"] { padding: 4px; }
+    button { padding: 4px 8px; }
+    </style>
+    <script>
+    function filterCertificates() {
+        const input = document.getElementById('search').value.toUpperCase();
+        const items = document.querySelectorAll('li');
+        items.forEach(li => {
+            const text = li.innerText.toUpperCase();
+            li.style.display = text.includes(input) ? '' : 'none';
+        });
+    }
+    </script>
+    </head><body>
+    <h2 style="text-align:center;">Generated Certificates</h2>
+    <input type="text" id="search" onkeyup="filterCertificates()" placeholder="Search...">
+    <ul>
+    {% for file in files %}
+        <li>
+            <a href="/download/{{ file }}" download>{{ file }}</a>
+            <form method="POST" action="/send/{{ file }}">
+                <input type="email" name="email" placeholder="Enter email" required />
+                <button type="submit">Send</button>
+            </form>
+        </li>
+    {% endfor %}
+    </ul></body></html>
+    """, files=files)
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    return send_from_directory(CERT_FOLDER, filename, as_attachment=True)
+
+@app.route('/send/<filename>', methods=['POST'])
+def send_certificate(filename):
+    email_to = request.form.get('email')
+    filepath = os.path.join(CERT_FOLDER, filename)
+
+    if not os.path.exists(filepath):
+        return "❌ File not found", 404
+
+    msg = EmailMessage()
+    msg['Subject'] = 'Your Internship Certificate'
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = email_to
+    msg.set_content('Please find your certificate attached.')
+
+    with open(filepath, 'rb') as f:
+        msg.add_attachment(f.read(), maintype='application', subtype='pdf', filename=filename)
+
+    try:
+        with smtplib.SMTP(EMAIL_SMTP, EMAIL_PORT) as smtp:
+            smtp.starttls()
+            smtp.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        return f"✅ Email sent to {email_to}"
+    except Exception as e:
+        return f"❌ Email failed: {str(e)}", 500
+
+
+# @app.route('/certificates')
+# def list_certs():
+#     # files = sorted(os.listdir(CERT_FOLDER))
+#     files = files = sorted(f for f in os.listdir(CERT_FOLDER) if f.lower().endswith('.pdf'))
+#     html = """
+#     <!DOCTYPE html>
+#     <html>
+#     <head>
+#         <title>Generated Certificates</title>
+#         <style>
+#             body {
+#                 font-family: Arial, sans-serif;
+#                 margin: 40px;
+#                 background: #f4f4f4;
+#             }
+#             h2 {
+#                 text-align: center;
+#                 color: #333;
+#             }
+#             #search {
+#                 width: 60%;
+#                 padding: 10px;
+#                 margin: 20px auto;
+#                 display: block;
+#                 font-size: 16px;
+#             }
+#             ul {
+#                 list-style-type: none;
+#                 padding: 0;
+#                 max-width: 600px;
+#                 margin: auto;
+#             }
+#             li {
+#                 margin: 8px 0;
+#                 background: white;
+#                 padding: 12px 18px;
+#                 border-radius: 5px;
+#                 box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+#                 display: flex;
+#                 justify-content: space-between;
+#                 align-items: center;
+#             }
+#             a {
+#                 text-decoration: none;
+#                 color: #007BFF;
+#             }
+#             a:hover {
+#                 text-decoration: underline;
+#             }
+#         </style>
+#         <script>
+#             function filterCertificates() {
+#                 let input = document.getElementById('search');
+#                 let filter = input.value.toUpperCase();
+#                 let ul = document.getElementById('certList');
+#                 let li = ul.getElementsByTagName('li');
+#                 for (let i = 0; i < li.length; i++) {
+#                     let a = li[i].getElementsByTagName("a")[0];
+#                     let txt = a.textContent || a.innerText;
+#                     li[i].style.display = txt.toUpperCase().includes(filter) ? "" : "none";
+#                 }
+#             }
+#         </script>
+#     </head>
+#     <body>
+#         <h2>Generated Certificates</h2>
+#         <input type="text" id="search" onkeyup="filterCertificates()" placeholder="Search for names...">
+#         <ul id="certList">
+#             {% for file in files %}
+#                 <li><a href="/download/{{ file }}" download>{{ file }}</a></li>
+#             {% endfor %}
+#         </ul>
+#     </body>
+#     </html>
+#     """
+#     return render_template_string(html, files=files)
+
+# @app.route('/download/<filename>')
+# def download_file(filename):
+#     return send_from_directory(CERT_FOLDER, filename, as_attachment=True)
 
 
 def generate_certificate(name, regno, course, from_date, to_date, degree, department, college, duration):
